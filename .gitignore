@@ -14,7 +14,7 @@ configs/eval_debug*.py
 configs/viz_*.py
 work_dirs
 outputs
-modeling_mixtral copy.py
+modeling_mixtral_copy.py
 models/*
 configs/internal/
 # Byte-compiled / optimized / DLL files

@@ -16,7 +16,7 @@ Please complete the following two steps before you begin to reproduce our result
 
 ## Command
 
-We first provide a quick command to valid the results of EEP (Prune+Merge) and the full model in Tab.1 on all datasets in one run. Please run:
+The following command produces **all results** of EEP (Prune+Merge) and the full model in Tab.1 in one run. Please run:
 ```
 python opencompass/tasks/openicl_reproduce.py dataset_cfgs/mixtral-8x7b-instruct-v0.1_boolq_eval.py --model_path /PATH/TO/YOUR/MIXTRAL-8X7B-INSTRUCT-V0.1/MODEL
 ```
@@ -33,7 +33,7 @@ To reproduce the results of random pruning, please use:
 python opencompass/tasks/random_prune.py dataset_cfgs/mixtral-8x7b-instruct-v0.1_{DATASET}_eval.py --model_path /PATH/TO/YOUR/MIXTRAL-8X7B-INSTRUCT-V0.1/MODEL --budget {BUDGET}
 ```
 
-To reproduce the results of EEP, please use: 
+To reproduce the results of EEP (Prune+Merge) on each single dataset, please use: 
 ```
 python opencompass/tasks/openicl_infer.py dataset_cfgs/mixtral-8x7b-instruct-v0.1_{DATASET}_eval.py --model_path /PATH/TO/YOUR/MIXTRAL-8X7B-INSTRUCT-V0.1/MODEL --coeff_path searched_coeff/{DATASET}_budget_{BUDGET}.pth
 ```
