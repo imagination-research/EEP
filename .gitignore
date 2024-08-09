@@ -1,8 +1,6 @@
 
 output_*/
 outputs/
-searched_coeff/more_datasets
-searched_coeff/more_datasets_ppl
 icl_inference_output/
 .vscode/
 tmp/
