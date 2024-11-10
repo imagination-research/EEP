@@ -25,6 +25,8 @@ from opencompass.tasks.openicl_eval import OpenICLEvalTask
 from opencompass.models.huggingface import HuggingFaceCausalLM
 from opencompass.tasks.merge_utils import *
 
+from transformers.models.mixtral import modeling_mixtral
+
 from datasets import load_dataset, concatenate_datasets
 
 @TASKS.register_module(force=(__name__ == '__main__'))  # A hack for script run
@@ -273,6 +275,7 @@ def parse_args():
     parser.add_argument('config', help='Config file path')
     parser.add_argument('--coeff_path', default=None, help='Path to the searched combination coefficients')
     parser.add_argument('--model_path', help='path to Mixtral-8x7B-Instruct-v0.1 huggingface model', required=True)
+    parser.add_argument('--work_dir', type=str, default=None, help='Path to save generated results and metrics')
     args = parser.parse_args()
     return args
 
@@ -283,17 +286,13 @@ def save_routing_weights(model, path):
         
 def load_coeff(coeff, model, expert_weights_dict, model_state_dict, budget=4, prefix="block_sparse_moe.experts"):
     merge_weights(model, coeff, expert_weights_dict, model_state_dict, target_num_expert=budget, prefix=prefix)
-    
-def get_dict(coeff):
-    while not isinstance(coeff, dict):
-        coeff = coeff[0]
-    return coeff
 
 if __name__ == '__main__':
     args = parse_args()
     cfg = Config.fromfile(args.config)
     cfg["models"][0]["path"] = args.model_path
     cfg["models"][0]["tokenizer_path"] = args.model_path
+    cfg["work_dir"] = args.work_dir
     cfg_save = copy.deepcopy(cfg)
     
     inferencer = OpenICLInferTask(cfg)
@@ -324,7 +323,6 @@ if __name__ == '__main__':
     if args.coeff_path is not None:
         print(f"Loading weight merging and router mapping matrix from {args.coeff_path}")
         coeff = torch.load(args.coeff_path)
-        coeff = get_dict(coeff)
         budget = list(coeff.values())[0].shape[0]
         load_coeff(coeff, model, expert_weights_dict, model_state_dict, budget=budget, prefix=prefix)
     
