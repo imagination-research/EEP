@@ -1,0 +1,75 @@
+from opencompass.models import HuggingFaceCausalLM
+
+datasets = [
+    [
+        dict(
+            abbr='squad2.0_3',
+            eval_cfg=dict(
+                evaluator=dict(type='opencompass.datasets.SQuAD20Evaluator'),
+                pred_role='BOT'),
+            infer_cfg=dict(
+                inferencer=dict(
+                    max_out_len=50,
+                    type='opencompass.openicl.icl_inferencer.GenInferencer', 
+                    dataset_split_type="random", 
+                    random_idx="./data/SQuAD2.0/random_index_train.pth", 
+                    start_ratio=0, end_ratio=1.0),
+                prompt_template=dict(
+                    template=dict(round=[
+                        dict(
+                            prompt=
+                            '{context}\nAccording to the above passage, answer the following question. If it is impossible to answer according to the passage, answer `impossible to answer`:\nQuestion: {question}',
+                            role='HUMAN'),
+                        dict(prompt='Answer:', role='BOT'),
+                    ]),
+                    type=
+                    'opencompass.openicl.icl_prompt_template.PromptTemplate'),
+                retriever=dict(
+                    type='opencompass.openicl.icl_retriever.ZeroRetriever')),
+            path='./data/SQuAD2.0/dev-v2.0.json',
+            reader_cfg=dict(
+                input_columns=[
+                    'context',
+                    'question',
+                ],
+                output_column='answers',
+                test_range='[5937:7916]'),
+            type='opencompass.datasets.SQuAD20Dataset'),
+    ],
+]
+eval = dict(runner=dict(task=dict()))
+models = [
+    dict(
+        abbr='mixtral-8x7b-instruct-v0.1',
+        # type=HuggingFaceCausalLM,
+        type='opencompass.models.HuggingFaceCausalLM',
+        path='/share/liuenshu/temp_files/llm_checkpoints/mistralai_Mixtral-8x7B-Instruct-v0.1',
+        tokenizer_path='/share/liuenshu/temp_files/llm_checkpoints/mistralai_Mixtral-8x7B-Instruct-v0.1',
+        model_kwargs=dict(
+            device_map='auto',
+            trust_remote_code=True,
+        ),
+        tokenizer_kwargs=dict(
+            padding_side='left',
+            truncation_side='left',
+            trust_remote_code=True,
+        ),
+        meta_template=dict(
+            begin="<s>",
+            round=[
+                dict(role="HUMAN", begin='[INST]', end='[/INST]'),
+                dict(role="BOT", begin="", end='</s>', generate=True),
+            ],
+            eos_token_id=2
+        ),
+        max_out_len=30,
+        max_seq_len=2048,
+        batch_size=32,
+        # num_experts_per_tok=1,
+        run_cfg=dict(num_gpus=4, num_procs=1),
+        end_str='</s>',
+        additional=dict(expert_select_type="top", fix_expert_idx=[0, 1], routing_weights_source="max"),
+        batch_padding=True,
+    )
+]
+work_dir = './outputs/squad/full_model_dataset'
