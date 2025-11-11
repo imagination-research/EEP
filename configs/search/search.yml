@@ -1,0 +1,30 @@
+discrete_iter: 100
+total_iter: 400
+discrete_mutate:
+    prob: 0.15
+crossover:
+    prob: 0.3
+    parents_select_type: "absolute" # ranking or absolute
+    parents_threshold: 1.0
+    parents_rank: 6
+    from_front_prob: 0.6
+mutate:
+    parents_select_type: "absolute"
+    parents_threshold: 3.0
+    parents_rank: 0
+    prob: 0.25
+    add_prob: 0.25
+    scale: 0.065
+norm_prob: 0.1
+
+max_init_num: 30
+
+weight_change_prob: 0.25
+transfer_change_prob: 0.25
+
+metric:
+    type: "accuracy"
+    score:
+        better: "larger"
+    accuracy:
+        better: "larger"
