@@ -114,13 +114,14 @@ def set_all_weights_group(layer_num, cfg, group_num=None):
 def parse_args():
     parser = argparse.ArgumentParser(description='Model Inferencer')
     parser.add_argument('config', help='Config file path')
+    parser.add_argument('--model_path', help='path to Mixtral-8x7B-Instruct-v0.1 huggingface model', required=True)
     parser.add_argument('--eval_cfg', help='Evaluation config file path', default="eval")
     parser.add_argument('--dev_cfg', help='Validation config file path', default=None)
     parser.add_argument('--dev_num', help='Number of coefficients to test on the dev set', type=int, default=20)
     parser.add_argument('--search_config', help='Search config file path')
     parser.add_argument('--data_path', help='Path to save all evaluated coefficients')
-    parser.add_argument('--split', help='Config file path')
-    parser.add_argument('--seed', help="Random seed", type=int, default=0)
+    parser.add_argument('--split', default="0")
+    parser.add_argument('--seed', help="Random seed", type=int, default=11450)
     parser.add_argument('--discrete_iter', help="Iteration of the pruning stage", type=int, default=None)
     parser.add_argument('--total_iter', help="Total iteration of both stages", type=int, default=None)
     parser.add_argument('--metric', help="Type of metric", type=str, default=None)
@@ -135,6 +136,8 @@ def main():
     # get args and model config
     args = parse_args()
     cfg = Config.fromfile(args.config)
+    cfg["models"][0]["path"] = args.model_path
+    cfg["models"][0]["tokenizer_path"] = args.model_path
     
     # get search config
     with open(args.search_config, "r") as f:
@@ -197,6 +200,62 @@ def main():
     metric_cfg = search_cfg["metric"][search_cfg["metric"]["type"]] # TODO: args.metric_type
     search_cfg = set_all_weights_group(len(model.model.model.layers), search_cfg)
     search_cfg = set_router_transfer_and_prob(search_cfg)
+    
+    def eval_results(name):
+        if args.dev_cfg is not None:
+            dev_cfg_path = args.config.replace("train.py", f"{args.dev_cfg}.py")
+            dev_cfg = Config.fromfile(dev_cfg_path)
+            dev_cfg["work_dir"] = os.path.join(save_path, f"results_dev_{name}")
+            if args.batch_size is not None:
+                dev_cfg["models"][0]["batch_size"] = args.batch_size
+            dev_cfg_save = copy.deepcopy(dev_cfg)
+            dev_inferencer = OpenICLInferTask(dev_cfg)
+            dev_evaler = OpenICLEvalTask(dev_cfg)
+            population = get_all_data(args.data_path, metric_cfg)
+            dev_metrics = []
+            for i in range(args.dev_num):
+                print(f"Evaluating coeff: {population[i]}")
+                # remove temp results
+                if os.path.exists(dev_cfg["work_dir"]):
+                    shutil.rmtree(dev_cfg["work_dir"])
+                coeff = population[i][0]
+                with torch.no_grad():
+                    merge_weights(model, coeff, expert_weights_dict, model_state_dict, target_num_expert=args.budget, prefix=prefix)
+                    dev_inferencer.run(model=model)
+                results = dev_evaler.run()
+                metric = get_metric(results, search_cfg)
+                print(f"Dev metric: {metric}")
+                dev_metrics.append(metric)
+                # reset inferencer and evaler
+                dev_cfg = copy.deepcopy(dev_cfg_save)
+                dev_inferencer = OpenICLInferTask(dev_cfg)
+                dev_evaler = OpenICLEvalTask(dev_cfg)
+            select_index = np.argmax(dev_metrics)
+            print(f"Choose {select_index}-th coefficient. The dev metric is {dev_metrics[select_index]}")
+        else:
+            select_index = 0
+        
+        # evaluate the search result
+        eval_cfg_path = args.config.replace("train.py", f"{args.eval_cfg}.py")
+        eval_cfg = Config.fromfile(eval_cfg_path)
+        eval_cfg["work_dir"] = os.path.join(save_path, f"results_eval_{name}")
+        if args.batch_size is not None:
+            eval_cfg["models"][0]["batch_size"] = args.batch_size
+        eval_inferencer = OpenICLInferTask(eval_cfg)
+        eval_evaler = OpenICLEvalTask(eval_cfg)
+        population = get_all_data(args.data_path, metric_cfg)
+        print(f"Evaluating final coeff: {population[select_index]}")
+        final_coeff = population[select_index][0]
+        # remove temp results
+        if os.path.exists(eval_cfg["work_dir"]):
+            shutil.rmtree(eval_cfg["work_dir"])
+        with torch.no_grad():
+            merge_weights(model, final_coeff, expert_weights_dict, model_state_dict, target_num_expert=args.budget, prefix=prefix)
+            eval_inferencer.run(model=model)
+        results = eval_evaler.run()
+        metric = get_metric(results, search_cfg)
+        print(f"{name} evaluation metric: {metric}")
+        
     while(1):
         
         # remove temp results
@@ -213,12 +272,7 @@ def main():
             if coeff == "continue enumeration":
                 continue
             
-        if (coeff is None and cur_save_path is None):
-            if not discrete_eval:
-                eval_results(name="prune")
-            init_done = True
-            
-        if init_done:
+        if init_done or (coeff is None and cur_save_path is None):
             init_done = True
             save_name = str(len(os.listdir(save_path)))
             
@@ -262,6 +316,9 @@ def main():
                     raise NotImplementedError
 
             if len(population) > search_cfg["discrete_iter"]:
+                if not discrete_eval:
+                    eval_results(name="prune")
+                discrete_eval = True
                 # TODO: only select the one with best val acc
                 coeff = mutate(search_cfg, coeff, group_change)
             else:
@@ -318,61 +375,6 @@ def main():
             break
         
     eval_results(name="merge")
-
-    def eval_results(name):
-        if args.dev_cfg is not None:
-            dev_cfg_path = args.config.replace("train.py", f"{args.dev_cfg}.py")
-            dev_cfg = Config.fromfile(dev_cfg_path)
-            dev_cfg["work_dir"] = os.path.join(save_path, f"results_dev_{name}")
-            if args.batch_size is not None:
-                dev_cfg["models"][0]["batch_size"] = args.batch_size
-            dev_cfg_save = copy.deepcopy(dev_cfg)
-            dev_inferencer = OpenICLInferTask(dev_cfg)
-            dev_evaler = OpenICLEvalTask(dev_cfg)
-            population = get_all_data(args.data_path, metric_cfg)
-            dev_metrics = []
-            for i in range(args.dev_num):
-                print(f"Evaluating coeff: {population[i]}")
-                # remove temp results
-                if os.path.exists(dev_cfg["work_dir"]):
-                    shutil.rmtree(dev_cfg["work_dir"])
-                coeff = population[i][0]
-                with torch.no_grad():
-                    merge_weights(model, coeff, expert_weights_dict, model_state_dict, target_num_expert=args.budget, prefix=prefix)
-                    dev_inferencer.run(model=model)
-                results = dev_evaler.run()
-                metric = get_metric(results, search_cfg)
-                print(f"Dev metric: {metric}")
-                dev_metrics.append(metric)
-                # reset inferencer and evaler
-                dev_cfg = copy.deepcopy(dev_cfg_save)
-                dev_inferencer = OpenICLInferTask(dev_cfg)
-                dev_evaler = OpenICLEvalTask(dev_cfg)
-            select_index = np.argmax(dev_metrics)
-            print(f"Choose {select_index}-th coefficient. The dev metric is {dev_metrics[select_index]}")
-        else:
-            select_index = 0
-        
-        # evaluate the search result
-        eval_cfg_path = args.config.replace("train.py", f"{args.eval_cfg}.py")
-        eval_cfg = Config.fromfile(eval_cfg_path)
-        eval_cfg["work_dir"] = os.path.join(save_path, f"results_eval_{name}")
-        if args.batch_size is not None:
-            eval_cfg["models"][0]["batch_size"] = args.batch_size
-        eval_inferencer = OpenICLInferTask(eval_cfg)
-        eval_evaler = OpenICLEvalTask(eval_cfg)
-        population = get_all_data(args.data_path, metric_cfg)
-        print(f"Evaluating final coeff: {population[select_index]}")
-        final_coeff = population[select_index][0]
-        # remove temp results
-        if os.path.exists(eval_cfg["work_dir"]):
-            shutil.rmtree(eval_cfg["work_dir"])
-        with torch.no_grad():
-            merge_weights(model, final_coeff, expert_weights_dict, model_state_dict, target_num_expert=args.budget, prefix=prefix)
-            eval_inferencer.run(model=model)
-        results = eval_evaler.run()
-        metric = get_metric(results, search_cfg)
-        print(f"{name} evaluation metric: {metric}")
 
 if __name__ == '__main__':
     main()
